@@ -30,6 +30,8 @@ def extract_digits_and_symbols(image, charContours, minW=5, minH=15):
   return (rois, locations)
 
 def process_ref():
+  CHARNAMES = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+
   ref = cv2.imread(args["reference"])
 
   ref = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY)
@@ -44,7 +46,7 @@ def process_ref():
 
   chars = {} # {"character": "associated roi image"}
 
-  for (name, roi) in zip(charNames, refROIS):
+  for (name, roi) in zip(CHARNAMES, refROIS):
     roi = cv2.resize(roi, (36, 36))
     chars[name] = roi
   
