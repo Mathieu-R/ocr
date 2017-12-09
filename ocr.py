@@ -1,5 +1,6 @@
 from pprint import pprint
 from imutils import contours as ct
+from imutils.perspective import four_point_transform
 import numpy as np
 import argparse
 import imutils
@@ -25,7 +26,6 @@ def extract_digits_and_symbols(ref, refCnts):
 
 def process_ref():
   ref = cv2.imread(args["reference"])
-  cv2.imshow('ref', ref)
 
   ref = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY)
   ref = imutils.resize(ref, width=400)
@@ -47,21 +47,28 @@ def process_img():
 
   # lecture de l'image du compteur
   image = cv2.imread(args["image"])
-  #cv2.imshow('original', image)
+  image = imutils.resize(image, height=500)
 
   # passage en niveau de gris
   img2gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-  #cv2.imshow('gray', img2gray)
+
+  #blurred = cv2.GaussianBlur(img2gray, (5, 5), 0)
+  #cv2.imshow('blur', blurred)
 
   # BLACKHAT: fait ressortir les parties plus foncées
-  blackhat = cv2.morphologyEx(img2gray, cv2.MORPH_BLACKHAT, rectKernel)
-  cv2.imshow('blackhat', blackhat)
+  #blackhat = cv2.morphologyEx(img2gray, cv2.MORPH_BLACKHAT, rectKernel)
+  #tophat = cv2.morphologyEx(img2gray, cv2.MORPH_TOPHAT, rectKernel)
+  #cv2.imshow('blackhat', img2gray)
 
   # détection de bords (Sobel)
-  edged = bords_detection_sobel(blackhat)
+  edged = bords_detection(img2gray)
   cv2.imshow('edge', edged)
 
-  tresh = closing_numbers(edged, rectKernel, sqKernel)
+  # isolation du compteur
+  counter = isolate_counter(edged.copy())
+  cv2.imshow('counter', counter)
+
+  tresh = closing_numbers(counter, rectKernel, sqKernel)
   #cv2.imshow('tresh', tresh)
 
   # détections des lignes afin d'isoler le rectangle 
@@ -107,6 +114,25 @@ def match_character(roi, digits):
   score = str(np.argmax(scores))
   return score
 
+def isolate_counter(edged):
+  cnts = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+  cnts = cnts[0] if imutils.is_cv2() else cnts[1]
+  cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
+  display = None
+  
+  # loop over the contours
+  for c in cnts:
+    # approximate the contour
+    peri = cv2.arcLength(c, True)
+    approx = cv2.approxPolyDP(c, 0.02 * peri, True)
+
+    if len(approx) == 4:
+      display = approx
+      break
+  
+  display = four_point_transform(edged, display.reshape(4, 2))
+  return display
+
 def lines_detection(image):
   MIN_ANGLE = 60 * np.pi / 180
   MAX_ANGLE = 120 * np.pi / 180
@@ -124,10 +150,9 @@ def closing_numbers(image, rectKernel, sqKernel):
   # apply a closing operation using the rectangular kernel to help
   # cloes gaps in between credit card number digits, then apply
   # Otsu's thresholding method to binarize the image
-  #thresh = cv2.threshold(edged, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-  #tresh = cv2.adaptiveThreshold(tresh, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
   edged = cv2.morphologyEx(image, cv2.MORPH_CLOSE, rectKernel)
-  thresh = cv2.threshold(edged, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+  #thresh = cv2.threshold(edged, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+  thresh = cv2.adaptiveThreshold(edged, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
   thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, sqKernel)
   return thresh
 
