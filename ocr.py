@@ -5,6 +5,8 @@ import numpy as np
 import argparse
 import imutils
 import cv2
+import pytesseract
+import sys
 
 ap = argparse.ArgumentParser()
 ap.add_argument("-i", "--image", required=True,
@@ -19,6 +21,7 @@ def extract_digits_and_symbols(ref, refCnts):
   for (i, c) in enumerate(refCnts):
     (x, y, w, h) = cv2.boundingRect(c)
     roi = ref[y:y + h, x:x + w]
+    #cv2.imshow('roi', roi)
     roi = cv2.resize(roi, (57, 88))
     digits[i] = roi
   
@@ -30,6 +33,7 @@ def process_ref():
   ref = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY)
   ref = imutils.resize(ref, width=400)
   ref = cv2.threshold(ref, 10, 255, cv2.THRESH_BINARY_INV)[1]
+  #cv2.imshow('ref', ref)
 
   refCnts = cv2.findContours(ref.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
   refCnts = refCnts[0] if imutils.is_cv2() else refCnts[1]
@@ -47,37 +51,33 @@ def process_img():
 
   # lecture de l'image du compteur
   image = cv2.imread(args["image"])
-  image = imutils.resize(image, height=500)
+  image = imutils.resize(image, width=300)
 
   # passage en niveau de gris
   img2gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-  #blurred = cv2.GaussianBlur(img2gray, (5, 5), 0)
-  #cv2.imshow('blur', blurred)
-
   # BLACKHAT: fait ressortir les parties plus foncées
   #blackhat = cv2.morphologyEx(img2gray, cv2.MORPH_BLACKHAT, rectKernel)
+  # TOPHAT: fait ressortir les parties plus claires
   #tophat = cv2.morphologyEx(img2gray, cv2.MORPH_TOPHAT, rectKernel)
   #cv2.imshow('blackhat', img2gray)
 
-  # détection de bords (Sobel)
-  edged = bords_detection(img2gray)
-  cv2.imshow('edge', edged)
+  # détection de bords (Canny / Sobel)
+  edged = bords_detection_canny(img2gray)
+  #cv2.imshow('edge', edged)
 
   # isolation du compteur
-  counter = isolate_counter(edged.copy())
+  counter = isolate_counter(edged.copy(), img2gray.copy())
   cv2.imshow('counter', counter)
 
-  tresh = closing_numbers(counter, rectKernel, sqKernel)
-  #cv2.imshow('tresh', tresh)
+  blurred = cv2.GaussianBlur(counter, (5, 5), 0)
 
-  # détections des lignes afin d'isoler le rectangle 
-  # contenant la valeur de consommation
-  #lines_detection(tresh)
+  edged = bords_detection_canny(blurred)
+  #cv2.imshow('counter - edge', edged)
 
-  # Une fois le rectangle récupéré
   # On isole chaque chiffre
-  contours_detections(tresh.copy(), digits)
+  score = contours_detections(edged.copy(), digits)
+  print("Consumption: {}".format(score))
   cv2.waitKey(0)
 
 def contours_detections(image, digits):
@@ -99,9 +99,11 @@ def contours_detections(image, digits):
       roi = cv2.resize(roi, (57, 88))
       score = match_character(roi, digits)
       scores.append(score)
+      cv2.rectangle(image, (x - 5, y - 5), (x + w + 5, y + h + 5), (0, 0, 255), 2)
   
+  #cv2.imshow('img - rect', image)
   scoreString = "".join(scores)
-  print("Consumption: {}".format(scoreString))
+  return scoreString
 
 def match_character(roi, digits):
   scores = []
@@ -114,7 +116,7 @@ def match_character(roi, digits):
   score = str(np.argmax(scores))
   return score
 
-def isolate_counter(edged):
+def isolate_counter(edged, gray):
   cnts = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
   cnts = cnts[0] if imutils.is_cv2() else cnts[1]
   cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
@@ -125,46 +127,31 @@ def isolate_counter(edged):
     # approximate the contour
     peri = cv2.arcLength(c, True)
     approx = cv2.approxPolyDP(c, 0.02 * peri, True)
+    (x, y, w, h) = cv2.boundingRect(c)
+    #print(f"[{w} - {h}, {approx}")
 
     if len(approx) == 4:
       display = approx
       break
   
-  display = four_point_transform(edged, display.reshape(4, 2))
+  display = four_point_transform(gray, display.reshape(4, 2))
   return display
 
-def lines_detection(image):
-  MIN_ANGLE = 60 * np.pi / 180
-  MAX_ANGLE = 120 * np.pi / 180
-  filteredLines = []
-
-  lines = cv2.HoughLines(image, 1, np.pi / 180, 200)
-
-  for line in lines:
-    #print(line[0][1])
-    angle = line[0][0]
-    if (angle > MIN_ANGLE and angle < MAX_ANGLE):
-      filteredLines.append(line)
-
-def closing_numbers(image, rectKernel, sqKernel):
-  # apply a closing operation using the rectangular kernel to help
-  # cloes gaps in between credit card number digits, then apply
-  # Otsu's thresholding method to binarize the image
-  edged = cv2.morphologyEx(image, cv2.MORPH_CLOSE, rectKernel)
-  #thresh = cv2.threshold(edged, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
-  thresh = cv2.adaptiveThreshold(edged, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-  thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, sqKernel)
+def highlight_numbers(image):
+  thresh = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+  kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 5))
+  thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
   return thresh
 
-def bords_detection_sobel(blackhat):
-  gradX = cv2.Sobel(blackhat, ddepth=cv2.CV_32F, dx=1, dy=0, ksize=-1)
+def bords_detection_sobel(image):
+  gradX = cv2.Sobel(image, ddepth=cv2.CV_32F, dx=1, dy=0, ksize=-1)
   gradX = np.absolute(gradX)
   (minVal, maxVal) = (np.min(gradX), np.max(gradX))
   gradX = (255 * ((gradX - minVal) / (maxVal - minVal)))
   edged = gradX.astype("uint8")
   return edged
 
-def bords_detection(image, sigma=0.33):
+def bords_detection_canny(image, sigma=0.33):
   v = np.median(image)
 
   lower = int(max(0, (1.0 - sigma) * v))
@@ -173,4 +160,7 @@ def bords_detection(image, sigma=0.33):
   return edged
 
 if __name__ == "__main__":
-  process_img()
+  try:
+    process_img()
+  except KeyboardInterrupt:
+    sys.exit(0)
