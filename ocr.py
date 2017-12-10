@@ -1,6 +1,7 @@
 from pprint import pprint
 from imutils import contours as ct
 from imutils.perspective import four_point_transform
+from PIL import Image
 import numpy as np
 import argparse
 import imutils
@@ -68,16 +69,22 @@ def process_img():
 
   # isolation du compteur
   counter = isolate_counter(edged.copy(), img2gray.copy())
-  cv2.imshow('counter', counter)
+  #cv2.imshow('counter', counter)
 
   blurred = cv2.GaussianBlur(counter, (5, 5), 0)
+
+  # convertit numpy ndarray en image
+  # pour la passer à tesseract
+  img = Image.fromarray(blurred)
+  txt = pytesseract.image_to_string(img)
 
   edged = bords_detection_canny(blurred)
   #cv2.imshow('counter - edge', edged)
 
   # On isole chaque chiffre
   score = contours_detections(edged.copy(), digits)
-  print("Consumption: {}".format(score))
+  print("[OPENCV Matching] Consommation: {}".format(score))
+  print("[TESSERACT] Consommation: {}".format(txt))
   cv2.waitKey(0)
 
 def contours_detections(image, digits):
