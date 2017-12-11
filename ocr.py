@@ -44,9 +44,6 @@ def process_ref():
   return refROIS
 
 def process_img():
-  rectKernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 3))
-  sqKernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-
   # lecture et traitement de l'image de référence
   digits = process_ref()
 
@@ -57,37 +54,34 @@ def process_img():
   # passage en niveau de gris
   img2gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-  # BLACKHAT: fait ressortir les parties plus foncées
-  #blackhat = cv2.morphologyEx(img2gray, cv2.MORPH_BLACKHAT, rectKernel)
-  # TOPHAT: fait ressortir les parties plus claires
-  #tophat = cv2.morphologyEx(img2gray, cv2.MORPH_TOPHAT, rectKernel)
-  #cv2.imshow('blackhat', img2gray)
-
   # détection de bords (Canny / Sobel)
   edged = bords_detection_canny(img2gray)
-  #cv2.imshow('edge', edged)
 
   # isolation du compteur
   counter = isolate_counter(edged.copy(), img2gray.copy())
-  #cv2.imshow('counter', counter)
 
+  # sans cela, tesseract est incapable de détecter les chiffres
   blurred = cv2.GaussianBlur(counter, (5, 5), 0)
+  cv2.imshow('blur', blurred)
+
+  # accentue les chiffres
+  higlightedNumbers = highlight_numbers(blurred)
+  cv2.imshow('higlighted', higlightedNumbers)
 
   # convertit numpy ndarray en image
   # pour la passer à tesseract
-  img = Image.fromarray(blurred)
+  img = Image.fromarray(higlightedNumbers)
   txt = pytesseract.image_to_string(img)
 
-  edged = bords_detection_canny(blurred)
-  #cv2.imshow('counter - edge', edged)
+  edged = bords_detection_canny(higlightedNumbers)
 
   # On isole chaque chiffre
-  score = contours_detections(edged.copy(), digits)
+  score = contours_detections(counter.copy(), edged.copy(), digits)
   print("[OPENCV Matching] Consommation: {}".format(score))
   print("[TESSERACT] Consommation: {}".format(txt))
   cv2.waitKey(0)
 
-def contours_detections(image, digits):
+def contours_detections(original, image, digits):
   contours = cv2.findContours(image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
   contours = contours[0] if imutils.is_cv2() else contours[1]
   contours = ct.sort_contours(contours, method="left-to-right")[0]
@@ -95,7 +89,7 @@ def contours_detections(image, digits):
 
   for c in contours:
     MIN_WIDTH = 15
-    MIN_HEIGHT = 15
+    MIN_HEIGHT = 20
 
     (x, y, w, h) = cv2.boundingRect(c)
     roi = image[y:y + h, x:x + w]
@@ -106,9 +100,9 @@ def contours_detections(image, digits):
       roi = cv2.resize(roi, (57, 88))
       score = match_character(roi, digits)
       scores.append(score)
-      cv2.rectangle(image, (x - 5, y - 5), (x + w + 5, y + h + 5), (0, 0, 255), 2)
+      cv2.rectangle(original, (x, y), (x + w, y + h), (0, 0, 255), 2)
   
-  #cv2.imshow('img - rect', image)
+  cv2.imshow('img - rect', original)
   scoreString = "".join(scores)
   return scoreString
 
@@ -145,9 +139,9 @@ def isolate_counter(edged, gray):
   return display
 
 def highlight_numbers(image):
-  thresh = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
-  kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 5))
-  thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+  # better results with blurred image
+  # https://docs.opencv.org/3.3.1/d7/d4d/tutorial_py_thresholding.html
+  thresh = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)[1]
   return thresh
 
 def bords_detection_sobel(image):
