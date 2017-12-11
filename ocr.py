@@ -2,6 +2,7 @@ from pprint import pprint
 from imutils import contours as ct
 from imutils.perspective import four_point_transform
 from PIL import Image
+from skimage import morphology
 import numpy as np
 import argparse
 import imutils
@@ -58,11 +59,14 @@ def process_img():
   edged = bords_detection_canny(img2gray)
 
   # isolation du compteur
-  counter = isolate_counter(edged.copy(), img2gray.copy())
+  #counter = isolate_counter(edged.copy(), img2gray.copy())
+  #counter = edged.copy() # test purpose
+  counter = isolate_counter(edged, img2gray)
+  #cv2.imshow('counter', counter)
 
   # sans cela, tesseract est incapable de détecter les chiffres
   blurred = cv2.GaussianBlur(counter, (5, 5), 0)
-  cv2.imshow('blur', blurred)
+  #cv2.imshow('blur', blurred)
 
   # accentue les chiffres
   higlightedNumbers = highlight_numbers(blurred)
@@ -93,6 +97,7 @@ def contours_detections(original, image, digits):
 
     (x, y, w, h) = cv2.boundingRect(c)
     roi = image[y:y + h, x:x + w]
+    cv2.rectangle(original, (x, y), (x + w, y + h), (0, 0, 255), 2)
     #cv2.imshow('number', roi)
 
     if (w >= MIN_WIDTH and h >= MIN_HEIGHT):
@@ -100,9 +105,8 @@ def contours_detections(original, image, digits):
       roi = cv2.resize(roi, (57, 88))
       score = match_character(roi, digits)
       scores.append(score)
-      cv2.rectangle(original, (x, y), (x + w, y + h), (0, 0, 255), 2)
   
-  cv2.imshow('img - rect', original)
+  #cv2.imshow('img - rect', original)
   scoreString = "".join(scores)
   return scoreString
 
